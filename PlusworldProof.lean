@@ -2,3 +2,4 @@
 -- Import modules here that should be built as part of the library.
 import PlusworldProof.Basic
 import PlusworldProof.Model
+import PlusworldProof.Scc
