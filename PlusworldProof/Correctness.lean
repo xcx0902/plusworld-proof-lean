@@ -211,4 +211,139 @@ theorem no_early_completion {a : ℕ → ℕ} {M v start : ℕ} (hM_n : M < I.n)
     have ha_end : a r = v := I.stay_v_aux hrgt hr_n2 h3 h2 hv_inc
     omega
 
+/-- 未完成集与计数 R：记录移动前位置 x 与当时未完成数 R 的二元组，对应终止节界。 -/
+noncomputable def unfinishedSet (a : ℕ → ℕ) : Finset ℕ :=
+  (Finset.range I.n).filter (fun i => a i < I.tgt i)
+
+theorem mem_unfinishedSet_iff {a : ℕ → ℕ} {i : ℕ} :
+    i ∈ I.unfinishedSet a ↔ i < I.n ∧ a i < I.tgt i := by
+  unfold unfinishedSet
+  simp only [Finset.mem_filter, Finset.mem_range]
+
+/-- 单调：数组逐点不减则未完成集缩小，故 R 不增。 -/
+theorem unfinished_subset_of_le {a b : ℕ → ℕ} (hle : ∀ i, a i ≤ b i) :
+    I.unfinishedSet b ⊆ I.unfinishedSet a := by
+  intro i hi
+  have hmem := (I.mem_unfinishedSet_iff).mp hi
+  obtain ⟨hi_n, hlt⟩ := hmem
+  have hle_i : a i ≤ b i := hle i
+  exact (I.mem_unfinishedSet_iff).mpr ⟨hi_n, lt_of_le_of_lt hle_i hlt⟩
+
+theorem card_unfinished_le_of_le {a b : ℕ → ℕ} (hle : ∀ i, a i ≤ b i) :
+    (I.unfinishedSet b).card ≤ (I.unfinishedSet a).card :=
+  Finset.card_le_card (I.unfinished_subset_of_le hle)
+
+/-- R 有界：R ≤ n。 -/
+theorem card_unfinished_le_n (a : ℕ → ℕ) :
+    (I.unfinishedSet a).card ≤ I.n := by
+  calc (I.unfinishedSet a).card ≤ (Finset.range I.n).card :=
+        Finset.card_le_card (Finset.filter_subset _ _)
+    _ = I.n := Finset.card_range _
+
+/-- 卡住自环步：已完成且 tgt_x = x 时右移即原地踏步。 -/
+theorem stuck_selfloop {a : ℕ → ℕ} {x : ℕ} (hx : x < I.n)
+    (heq : a x = I.tgt x) (heq2 : I.tgt x = x) :
+    I.GreedyStep (a, x) (a, x) := by
+  have h : I.GreedyStep (a, x) (a, I.tgt x) := GreedyStep.moveRight hx heq
+  rwa [heq2] at h
+
+/-- 卡住时贪心确定：已完成自环处唯一后继即自身
+    （左移/加一皆需未完成，由 heq 经 omega 排除）。 -/
+theorem stuck_deterministic {a : ℕ → ℕ} {x : ℕ} {t : (ℕ → ℕ) × ℕ}
+    (heq : a x = I.tgt x) (heq2 : I.tgt x = x)
+    (h : I.GreedyStep (a, x) t) : t = (a, x) := by
+  cases h with
+  | @moveLeft _ _ _ hinc _ _ => omega
+  | @incr _ _ _ hinc _ _ => omega
+  | @moveRight _ _ _ _ => rw [heq2]
+
+/-- 卡住后状态恒定：自环迹永留原状态（对迹作归纳，每步由确定性得后继即自身）。 -/
+theorem stuck_fixed {a : ℕ → ℕ} {x : ℕ} (_hx : x < I.n)
+    (heq : a x = I.tgt x) (heq2 : I.tgt x = x)
+    {t : (ℕ → ℕ) × ℕ}
+    (h : Relation.ReflTransGen I.GreedyStep (a, x) t) : t = (a, x) := by
+  induction h with
+  | refl => rfl
+  | @tail m t htail hstep ih =>
+    have hm_eq : m = (a, x) := ih
+    subst hm_eq
+    exact I.stuck_deterministic heq heq2 hstep
+
+/-- 卡住报告无解的合理性：卡住（含剩余未完成 y）后任何延续都不全完成。 -/
+theorem stuck_never_succeeds {a : ℕ → ℕ} {x : ℕ} (hx : x < I.n)
+    (heq : a x = I.tgt x) (heq2 : I.tgt x = x)
+    {y : ℕ} (hy_n : y < I.n) (hy_inc : a y < I.tgt y)
+    {t : (ℕ → ℕ) × ℕ}
+    (h : Relation.ReflTransGen I.GreedyStep (a, x) t) :
+    ¬ ∀ i, i < I.n → t.1 i = I.tgt i := by
+  intro hsucc
+  have hfix : t = (a, x) := I.stuck_fixed hx heq heq2 h
+  have harr : t.1 = a := congrArg Prod.fst hfix
+  have hcon : a y = I.tgt y := by
+    rw [← harr]
+    exact hsucc y hy_n
+  omega
+
+/-- 单步方向（右）：已完成非自环则严格向右（tgt_x ≥ x 且 ≠ x）。
+    editorial 移动界右相“沿最终边严格向右”。 -/
+theorem completed_move_gt {x : ℕ} (hx : x < I.n) (hne : I.tgt x ≠ x) :
+    x < I.tgt x := by
+  have hge := I.htgt_ge x hx
+  omega
+
+/-- 单步方向（左）：左移目标即 a_x < x。editorial 移动界左相“严格向左”。 -/
+theorem moveLeft_target_lt {a : ℕ → ℕ} {x : ℕ} (hlt : a x < x) :
+    (a, a x).2 < x :=
+  hlt
+
+/-- 二元组空间有限：(x, R) ∈ range n × range (n+1)，基数 n*(n+1)。
+    editorial 移动界的基础：每次移动记录 (x, R)，x < n 且 R ≤ n。 -/
+theorem pair_space_card :
+    ((Finset.range I.n) ×ˢ (Finset.range (I.n + 1))).card
+      = I.n * (I.n + 1) := by
+  rw [Finset.card_product, Finset.card_range, Finset.card_range]
+
+/-- 给定 NoDup 的移动记录表长 ≤ 对空间基数（editorial“二元组不可能出现两次”组装处：
+    单步方向 + stay_v_aux 左相不返回 + 已完成路不下降已分别形式化，此处为纯组合推论）。 -/
+theorem moves_bound_of_nodup {l : List (ℕ × ℕ)}
+    (hnd : l.Nodup)
+    (hmem : ∀ x ∈ l, x.1 < I.n ∧ x.2 ≤ I.n) :
+    l.length ≤ I.n * (I.n + 1) := by
+  have hsub : l.toFinset ⊆ (Finset.range I.n) ×ˢ (Finset.range (I.n + 1)) := by
+    intro x hx
+    rw [List.mem_toFinset] at hx
+    obtain ⟨hx1, hx2⟩ := hmem x hx
+    simp only [Finset.mem_product, Finset.mem_range]
+    exact ⟨hx1, by omega⟩
+  have hcard : l.toFinset.card = l.length :=
+    List.toFinset_card_of_nodup hnd
+  calc l.length = l.toFinset.card := hcard.symm
+    _ ≤ (((Finset.range I.n) ×ˢ (Finset.range (I.n + 1)))).card :=
+        Finset.card_le_card hsub
+    _ = I.n * (I.n + 1) := I.pair_space_card
+
+/-- 操作总数算术界（editorial 最终求和）：n*(n-1)+n*(n+1) ≤ 2*n^2，
+    题目允许 o ≤ 2n^2；n≥1 时用 n*n 版本得 2*n^2-n < 2*n^2。 -/
+theorem total_le_2n2_arith : I.n * (I.n - 1) + I.n * (I.n + 1) ≤ 2 * I.n ^ 2 := by
+  by_cases hn0 : I.n = 0
+  · rw [hn0]; simp
+  · obtain ⟨k, hk⟩ := Nat.exists_eq_succ_of_ne_zero hn0
+    rw [hk]
+    have hsub : k.succ - 1 = k := by omega
+    rw [hsub]
+    simp only [Nat.succ_eq_add_one]
+    have key : (k + 1) * k + (k + 1) * (k + 1 + 1) = 2 * (k + 1) ^ 2 := by ring
+    omega
+
+/-- 总量界组装：加一部分（数组增长 ≤ 和式）+ 移动部分（NoDup 表长 ≤ 对空间），
+    得 n*(n-1)+|l| ≤ 2*n^2，恰为题目 o ≤ 2n^2 界；editorial 得更紧的 2n^2-n。 -/
+theorem total_bound_of_nodup {l : List (ℕ × ℕ)}
+    (hnd : l.Nodup)
+    (hmem : ∀ x ∈ l, x.1 < I.n ∧ x.2 ≤ I.n) :
+    I.n * (I.n - 1) + l.length ≤ 2 * I.n ^ 2 := by
+  calc I.n * (I.n - 1) + l.length
+      ≤ I.n * (I.n - 1) + I.n * (I.n + 1) :=
+        Nat.add_le_add_left (I.moves_bound_of_nodup hnd hmem) _
+    _ ≤ 2 * I.n ^ 2 := I.total_le_2n2_arith
+
 end PWInstance
