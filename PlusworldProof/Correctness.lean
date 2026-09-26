@@ -124,4 +124,91 @@ theorem greedy_success_solvable {a : ℕ → ℕ} {p start : ℕ}
     (hsucc : ∀ i, i < I.n → a i = I.tgt i) : I.Solvable := by
   refine ⟨start, hstart, a, p, I.greedy_to_step h, hsucc⟩
 
+/-- 后分量 max 更大则前 max 更小（相邻待处理分量 max 严格递增的图论版） -/
+theorem max_lt_of_leave {M1 N M2 : ℕ} (_hM1_n : M1 < I.n)
+    (htgt_gt : M1 < I.tgt M1)
+    (hReach : I.Reach (I.tgt M1) N)
+    (hcomp : ∀ z, I.Reach (I.tgt M1) z → I.Reach z N → z ≠ N → I.src z = I.tgt z)
+    (hle : N ≤ M2) : M1 < M2 := by
+  have hge : I.tgt M1 ≤ N := I.completed_path_ge_aux hReach hcomp
+  omega
+
+/-- 向左移动留在当前分量（给定后分量 max 更大时） -/
+theorem stay_inside_left {a : ℕ → ℕ} {x y : ℕ} (hv : I.ValidState a)
+    (hx : x < I.n) (hy : y < I.n)
+    (hinc_x : a x < I.tgt x) (hlt : y < x) (heq : a x = y)
+    (hinc_y : a y < I.tgt y)
+    {Mv : ℕ} (hMv_n : Mv < I.n) (hMv_scc : I.SCC Mv y) (hMv_gt : x < Mv) :
+    I.SCC x y := by
+  have hlt2 : a x < x := by rw [heq]; exact hlt
+  have hEdge : I.Edge x y := by
+    rw [← heq]
+    exact I.moveLeft_is_edge hv hx hinc_x hlt2
+  have hReach_xy : I.Reach x y := Relation.ReflTransGen.single hEdge
+  by_contra hneg
+  have hNotReach : ¬ I.Reach y x := fun h => hneg ⟨hReach_xy, h⟩
+  have hsrc_x : I.src x < I.tgt x := by
+    have ⟨hle_src, _⟩ := hv x hx
+    omega
+  have hsrc_y : I.src y < I.tgt y := by
+    have ⟨hle_src, _⟩ := hv y hy
+    omega
+  have hlt_xy : x < y := I.order_of_reach hx hy hMv_n hsrc_x hsrc_y hReach_xy hNotReach hMv_scc hMv_gt
+  omega
+
+/-- 不会过早完成最大点：贪心迹达 (a,M)，M 差一步完成且左条件为假，
+    同分量尚有最大未完成 v<M（其间皆已完成），则矛盾。
+    证明经 M→…→v 路用 crossing 得 r>v≥z，再由区间性得 r→v；
+    r 与 M 同分量故 r≤M，分 r=M（当前值已含 v 则左条件真，或经历史+保持得 aM=v）与
+    r<M（已完成故值>v，经历史+保持得 ar=v）皆矛盾。
+    editorial“不会提前离开当前分量”中唯一需要担心的情形。 -/
+theorem no_early_completion {a : ℕ → ℕ} {M v start : ℕ} (hM_n : M < I.n)
+    (hTrace : Relation.ReflTransGen I.GreedyStep (I.src, start) (a, M))
+    (haM_last : a M + 1 = I.tgt M)
+    (hnotleft_M : ¬ (a M < M ∧ a (a M) < I.tgt (a M)))
+    (hv_lt : v < M) (hv_inc : a v < I.tgt v)
+    (hscc : I.SCC M v) (hmax : ∀ z, I.SCC M z → z ≤ M)
+    (hv_max : ∀ u, v < u → u < M → a u = I.tgt u) : False := by
+  have hReach_Mv : I.Reach M v := hscc.1
+  have hReach_vM : I.Reach v M := hscc.2
+  obtain ⟨r, z, hrEdge, hrReach, hzReach, hrgt, hzle⟩ :=
+    I.crossing_exists hReach_Mv le_rfl hv_lt
+  have hr_n : r < I.n := hrEdge.1
+  have hz_src_le : I.src r ≤ z := hrEdge.2.2.1
+  have hz_le_tgt : z ≤ I.tgt r := hrEdge.2.2.2
+  have hr_le_tgt : r ≤ I.tgt r := I.htgt_ge r hr_n
+  have hEdge_rv : I.Edge r v := I.crossing_edge hrEdge hzle (by omega)
+  have hReach_rM : I.Reach r M :=
+    Relation.ReflTransGen.trans (Relation.ReflTransGen.trans (Relation.ReflTransGen.single hrEdge) hzReach) hReach_vM
+  have hr_le_M : r ≤ M := hmax r ⟨hrReach, hReach_rM⟩
+  have hsrc_r_le_v : I.src r ≤ v := le_trans hz_src_le hzle
+  by_cases heq_rM : r = M
+  · subst heq_rM
+    -- 此时 r（即原 M）为最大点，当前 a r = tgt r -1 ≥ v
+    have hr_le_tgt : r ≤ I.tgt r := I.htgt_ge r hM_n
+    have hv_le_ar : v ≤ a r := by omega
+    by_cases heq_v : v = a r
+    · have hleft_r : a r < r ∧ a (a r) < I.tgt (a r) := by
+        constructor
+        · rw [← heq_v]; exact hv_lt
+        · rw [← heq_v]; exact hv_inc
+      exact False.elim (hnotleft_M hleft_r)
+    · have hlt_ar : v < a r := by omega
+      have hsrc_lt_ar : I.src r < a r := lt_of_le_of_lt hsrc_r_le_v hlt_ar
+      obtain ⟨a_mid, h1, h2, h3⟩ :=
+        I.greedy_attained hTrace hsrc_r_le_v (le_of_lt hlt_ar) hsrc_lt_ar
+      have ha_end : a r = v := I.stay_v_aux hv_lt hM_n h3 h2 hv_inc
+      omega
+  · have hr_lt_M : r < M := lt_of_le_of_ne hr_le_M heq_rM
+    have hr_n2 : r < I.n := lt_of_le_of_lt hr_le_M hM_n
+    have har_eq : a r = I.tgt r := hv_max r hrgt hr_lt_M
+    have hr_le_tgtr : r ≤ I.tgt r := I.htgt_ge r hr_n2
+    have hv_lt_ar : v < a r := by omega
+    have hsrc_lt_ar : I.src r < a r := lt_of_le_of_lt hsrc_r_le_v hv_lt_ar
+    have hle_v_ar : v ≤ a r := le_of_lt hv_lt_ar
+    obtain ⟨a_mid, h1, h2, h3⟩ :=
+      I.greedy_attained hTrace hsrc_r_le_v hle_v_ar hsrc_lt_ar
+    have ha_end : a r = v := I.stay_v_aux hrgt hr_n2 h3 h2 hv_inc
+    omega
+
 end PWInstance
